@@ -6,6 +6,7 @@
 'use strict';
 
 import { WebSiteManagementMappers } from '@azure/arm-appservice';
+import * as extract from 'extract-zip';
 import * as vscode from 'vscode';
 import { registerAppServiceExtensionVariables } from 'vscode-azureappservice';
 import { AzExtTreeDataProvider, AzureUserInput, callWithTelemetryAndErrorHandling, createApiProvider, createAzExtOutputChannel, IActionContext, registerEvent, registerUIExtensionVariables } from 'vscode-azureextensionui';
@@ -28,6 +29,8 @@ import { registerFuncHostTaskEvents } from './funcCoreTools/funcHostTask';
 import { validateFuncCoreToolsIsLatest } from './funcCoreTools/validateFuncCoreToolsIsLatest';
 import { CentralTemplateProvider } from './templates/CentralTemplateProvider';
 import { AzureAccountTreeItemWithProjects } from './tree/AzureAccountTreeItemWithProjects';
+import { getNameFromId } from './utils/azure';
+import { requestUtils } from './utils/requestUtils';
 import { AzureFunctionsExtensionApi } from './vscode-azurefunctions.api';
 import { verifyVSCodeConfigOnActivate } from './vsCodeConfig/verifyVSCodeConfigOnActivate';
 
@@ -40,6 +43,26 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
 
     registerUIExtensionVariables(ext);
     registerAppServiceExtensionVariables(ext);
+    vscode.window.registerUriHandler({
+        handleUri(uri: vscode.Uri): void {
+            // do something with the URI
+            vscode.window.showInputBox({prompt: "Enter zip file path", ignoreFocusOut: true, value: 'f:\\temp\\'}).then((inputText: string) => {
+                const resourceId = uri.query.split('=')[1];
+                const url = `https://${getNameFromId(resourceId)}.scm.azurewebsites.net/api/functions/admin/download?includeCsproj=true&includeAppSettings=true`;
+                vscode.window.showInformationMessage(url);
+                requestUtils.downloadFile(url, inputText).then(() => {
+                    vscode.window.showInformationMessage('Download done');
+                    const folderName = inputText.split('\\')[2].split('.')[0];
+                    extract(inputText, { dir: `f:\\temp\\${folderName}\\` }, (err: Error) => {
+                        vscode.window.showInformationMessage('Extract files done');
+                    });
+                });
+            });
+            ext.azureAccountTreeItem.getIsLoggedIn().then((result) => {
+                vscode.window.showInformationMessage(`Is logged in ${result}`);
+            });
+        }
+    });
 
     await callWithTelemetryAndErrorHandling('azureFunctions.activate', async (activateContext: IActionContext) => {
         activateContext.telemetry.properties.isActivationEvent = 'true';
@@ -102,4 +125,8 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
 
 // tslint:disable-next-line:no-empty
 export function deactivateInternal(): void {
+}
+
+export function onDidChangeInternal(context: vscode.ExtensionContext): void {
+    vscode.window.showInformationMessage(context.extensionUri.toString());
 }
