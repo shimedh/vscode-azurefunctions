@@ -46,22 +46,10 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     vscode.window.registerUriHandler({
         handleUri(uri: vscode.Uri): void {
             // tslint:disable-next-line:no-unexternalized-strings
-            vscode.window.showInputBox({prompt: "Enter zip file path", ignoreFocusOut: true, value: 'f:\\temp\\'}).then((inputText: string) => {
+            vscode.window.showInputBox({prompt: "Enter folder path for local project", ignoreFocusOut: true, value: 'f:\\temp'}).then((filePath: string) => {
                 // tslint:disable-next-line:no-unexternalized-strings
                 vscode.window.showInputBox({prompt: "Enter Bearer token", ignoreFocusOut: true}).then((token: string) => {
-                    const resourceId: string = uri.query.split('=')[1];
-                    const url: string = `https://${getNameFromId(resourceId)}.scm.azurewebsites.net/api/functions/admin/download?includeCsproj=true&includeAppSettings=true`;
-                    // tslint:disable-next-line:no-any
-                    const headers: { [key: string]: any } = { Authorization: `Bearer ${token}` };
-                    // tslint:disable-next-line: no-floating-promises
-                    requestUtils.downloadFile(url, inputText, headers).then(() => {
-                        vscode.window.showInformationMessage('Download done');
-                        const folderName: string = inputText.split('\\')[2].split('.')[0];
-                        // tslint:disable-next-line: no-unsafe-any
-                        extract(inputText, { dir: `f:\\temp\\${folderName}\\` }, (_err: Error) => {
-                            vscode.window.showInformationMessage('Extract files done');
-                        });
-                    });
+                    setupLocalProjectFolder(uri, filePath, token);
                 });
             });
 
@@ -136,4 +124,39 @@ export function deactivateInternal(): void {
 
 export function onDidChangeInternal(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage(context.extensionUri.toString());
+}
+
+function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string): void {
+    const queryParts: string[] = uri.query.split('&');
+    const resourceId: string = queryParts[0].split('=')[1];
+    const devContainerName: string = queryParts[1].split('=')[1];
+    const functionAppName: string = getNameFromId(resourceId);
+    const url: string = `https://${functionAppName}.scm.azurewebsites.net/api/functions/admin/download?includeCsproj=true&includeAppSettings=true`;
+    // tslint:disable-next-line:no-any
+    const headers: { [key: string]: any } = { Authorization: `Bearer ${token}` };
+    const downloadFilePath: string = `${filePath}\\${functionAppName}.zip`;
+    const folderName: string = downloadFilePath.split('\\')[2].split('.')[0];
+    // tslint:disable-next-line: no-floating-promises
+    requestUtils.downloadFile(url, downloadFilePath, headers).then(() => {
+        vscode.window.showInformationMessage('Download done');
+        // tslint:disable-next-line: no-unsafe-any
+        extract(downloadFilePath, { dir: `${filePath}\\${folderName}\\` }, (_err: Error) => {
+            vscode.window.showInformationMessage('Extract files done');
+            // tslint:disable-next-line: no-floating-promises
+            const downloadDevContainerPath: string = `${filePath}\\master.zip`;
+            // tslint:disable-next-line: no-floating-promises
+            requestUtils.downloadFile(
+                'https://github.com/microsoft/vscode-dev-containers/archive/master.zip',
+                downloadDevContainerPath
+            ).then(() => {
+                vscode.window.showInformationMessage('Download of dev containers done');
+                const devContainerfolderName: string = downloadDevContainerPath.split('\\')[2].split('.')[0];
+                // tslint:disable-next-line: no-unsafe-any
+                extract(downloadDevContainerPath, { dir: `${filePath}\\${devContainerfolderName}\\` }, (_err1: Error) => {
+                    vscode.window.showInformationMessage('Extract dev container files done');
+                    vscode.workspace.fs.copy(vscode.Uri.file(`${filePath}\\${devContainerfolderName}\\vscode-dev-containers-master\\containers\\${devContainerName}\\.devcontainer\\`), vscode.Uri.file(`${filePath}\\${folderName}\\.devcontainer`));
+                });
+            });
+        });
+    });
 }
