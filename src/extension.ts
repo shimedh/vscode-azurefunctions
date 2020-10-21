@@ -46,9 +46,9 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     vscode.window.registerUriHandler({
         handleUri(uri: vscode.Uri): void {
             // tslint:disable-next-line:no-unexternalized-strings
-            vscode.window.showInputBox({prompt: "Enter folder path for local project", ignoreFocusOut: true, value: 'f:\\temp'}).then((filePath: string) => {
+            vscode.window.showInputBox({ prompt: "Enter folder path for local project", ignoreFocusOut: true, value: 'f:\\temp' }).then((filePath: string) => {
                 // tslint:disable-next-line:no-unexternalized-strings
-                vscode.window.showInputBox({prompt: "Enter Bearer token", ignoreFocusOut: true}).then((token: string) => {
+                vscode.window.showInputBox({ prompt: "Enter Bearer token", ignoreFocusOut: true }).then((token: string) => {
                     setupLocalProjectFolder(uri, filePath, token);
                 });
             });
@@ -157,6 +157,8 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
                             overwrite: true
                         }
                     );
+
+                    vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(`${filePath}\\${folderName}\\`));
                 });
             });
         });
