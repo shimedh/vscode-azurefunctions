@@ -26,13 +26,8 @@ async function deactivate(ctx) {
     return await extension.deactivateInternal(ctx, perfStats);
 }
 
-async function onDidChange(ctx) {
-    return await extension.onDidChangeInternal(ctx);
-}
-
 // Export as entrypoints for vscode
 exports.activate = activate;
 exports.deactivate = deactivate;
-exports.onDidChange = onDidChange;
 
 perfStats.loadEndTime = Date.now();

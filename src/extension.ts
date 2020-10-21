@@ -122,10 +122,6 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
 export function deactivateInternal(): void {
 }
 
-export function onDidChangeInternal(context: vscode.ExtensionContext): void {
-    vscode.window.showInformationMessage(context.extensionUri.toString());
-}
-
 function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string): void {
     const queryParts: string[] = uri.query.split('&');
     const resourceId: string = queryParts[0].split('=')[1];
@@ -154,7 +150,13 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
                 // tslint:disable-next-line: no-unsafe-any
                 extract(downloadDevContainerPath, { dir: `${filePath}\\${devContainerfolderName}\\` }, (_err1: Error) => {
                     vscode.window.showInformationMessage('Extract dev container files done');
-                    vscode.workspace.fs.copy(vscode.Uri.file(`${filePath}\\${devContainerfolderName}\\vscode-dev-containers-master\\containers\\${devContainerName}\\.devcontainer\\`), vscode.Uri.file(`${filePath}\\${folderName}\\.devcontainer`));
+                    vscode.workspace.fs.copy(
+                        vscode.Uri.file(`${filePath}\\${devContainerfolderName}\\vscode-dev-containers-master\\containers\\${devContainerName}\\.devcontainer\\`),
+                        vscode.Uri.file(`${filePath}\\${folderName}\\.devcontainer`),
+                        {
+                            overwrite: true
+                        }
+                    );
                 });
             });
         });
