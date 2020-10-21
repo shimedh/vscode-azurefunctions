@@ -17,8 +17,9 @@ import { downloadAppSettingsFromApi } from './commands/api/downloadAppSettingsFr
 import { revealTreeItem } from './commands/api/revealTreeItem';
 import { uploadAppSettingsFromApi } from './commands/api/uploadAppSettingsFromApi';
 import { runPostFunctionCreateStepsFromCache } from './commands/createFunction/FunctionCreateStepBase';
+import { initProjectForVSCode } from './commands/initProjectForVSCode/initProjectForVSCode';
 import { registerCommands } from './commands/registerCommands';
-import { func } from './constants';
+import { func, ProjectLanguage } from './constants';
 import { FuncTaskProvider } from './debug/FuncTaskProvider';
 import { JavaDebugProvider } from './debug/JavaDebugProvider';
 import { NodeDebugProvider } from './debug/NodeDebugProvider';
@@ -40,22 +41,22 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     ext.outputChannel = createAzExtOutputChannel('Azure Functions', ext.prefix);
     context.subscriptions.push(ext.outputChannel);
     ext.ui = new AzureUserInput(context.globalState);
+    const projectFilePath: string = '';
+    const language: ProjectLanguage = ProjectLanguage.PowerShell;
 
     registerUIExtensionVariables(ext);
     registerAppServiceExtensionVariables(ext);
+    ext.context.globalState.update("isHackathon", false);
     vscode.window.registerUriHandler({
         handleUri(uri: vscode.Uri): void {
+            ext.context.globalState.update("isHackathon", true);
             // tslint:disable-next-line:no-unexternalized-strings
             vscode.window.showInputBox({ prompt: "Enter folder path for local project", ignoreFocusOut: true, value: 'f:\\temp' }).then((filePath: string) => {
                 // tslint:disable-next-line:no-unexternalized-strings
                 vscode.window.showInputBox({ prompt: "Enter Bearer token", ignoreFocusOut: true }).then((token: string) => {
-                    setupLocalProjectFolder(uri, filePath, token);
+                    setupLocalProjectFolder(uri, filePath, token, projectFilePath);
                 });
             });
-
-            /*ext.azureAccountTreeItem.getIsLoggedIn().then((result) => {
-                vscode.window.showInformationMessage(`Is logged in ${result}`);
-            });*/
         }
     });
 
@@ -77,7 +78,11 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
         const validateEventId: string = 'azureFunctions.validateFunctionProjects';
         // tslint:disable-next-line:no-floating-promises
         callWithTelemetryAndErrorHandling(validateEventId, async (actionContext: IActionContext) => {
-            await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
+            if (!ext.context.globalState.get("isHackathon")) {
+                await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
+            } else {
+                await initProjectForVSCode(actionContext, projectFilePath, language);
+            }
         });
         registerEvent(validateEventId, vscode.workspace.onDidChangeWorkspaceFolders, async (actionContext: IActionContext, event: vscode.WorkspaceFoldersChangeEvent) => {
             await verifyVSCodeConfigOnActivate(actionContext, event.added);
@@ -122,7 +127,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
 export function deactivateInternal(): void {
 }
 
-function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string): void {
+function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string, projectFilePath: string): void {
     const queryParts: string[] = uri.query.split('&');
     const resourceId: string = queryParts[0].split('=')[1];
     const devContainerName: string = queryParts[1].split('=')[1];
@@ -135,8 +140,9 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
     // tslint:disable-next-line: no-floating-promises
     requestUtils.downloadFile(url, downloadFilePath, headers).then(() => {
         vscode.window.showInformationMessage('Download done');
+        projectFilePath = `${filePath}\\${folderName}\\`;
         // tslint:disable-next-line: no-unsafe-any
-        extract(downloadFilePath, { dir: `${filePath}\\${folderName}\\` }, (_err: Error) => {
+        extract(downloadFilePath, { dir: projectFilePath }, (_err: Error) => {
             vscode.window.showInformationMessage('Extract files done');
             // tslint:disable-next-line: no-floating-promises
             const downloadDevContainerPath: string = `${filePath}\\master.zip`;
@@ -152,13 +158,13 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
                     vscode.window.showInformationMessage('Extract dev container files done');
                     vscode.workspace.fs.copy(
                         vscode.Uri.file(`${filePath}\\${devContainerfolderName}\\vscode-dev-containers-master\\containers\\${devContainerName}\\.devcontainer\\`),
-                        vscode.Uri.file(`${filePath}\\${folderName}\\.devcontainer`),
+                        vscode.Uri.file(`${projectFilePath}.devcontainer`),
                         {
                             overwrite: true
                         }
                     );
 
-                    vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(`${filePath}\\${folderName}\\`));
+                    vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(projectFilePath));
                 });
             });
         });
