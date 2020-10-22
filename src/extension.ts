@@ -20,6 +20,7 @@ import { runPostFunctionCreateStepsFromCache } from './commands/createFunction/F
 import { initProjectForVSCode } from './commands/initProjectForVSCode/initProjectForVSCode';
 import { registerCommands } from './commands/registerCommands';
 import { func, ProjectLanguage } from './constants';
+import { AzureAccount } from './debug/AzureAccountExtension.api';
 import { FuncTaskProvider } from './debug/FuncTaskProvider';
 import { JavaDebugProvider } from './debug/JavaDebugProvider';
 import { NodeDebugProvider } from './debug/NodeDebugProvider';
@@ -44,17 +45,27 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     const projectFilePath: string = '';
     const language: ProjectLanguage = ProjectLanguage.PowerShell;
 
+    const azureAccountExt = vscode.extensions.getExtension<AzureAccount>("ms-vscode.azure-account");
+
     registerUIExtensionVariables(ext);
     registerAppServiceExtensionVariables(ext);
-    ext.context.globalState.update("isHackathon", false);
     vscode.window.registerUriHandler({
         handleUri(uri: vscode.Uri): void {
+            vscode.window.showInformationMessage('handle uri called');
             ext.context.globalState.update("isHackathon", true);
             // tslint:disable-next-line:no-unexternalized-strings
-            vscode.window.showInputBox({ prompt: "Enter folder path for local project", ignoreFocusOut: true, value: 'f:\\temp' }).then((filePath: string) => {
-                // tslint:disable-next-line:no-unexternalized-strings
-                vscode.window.showInputBox({ prompt: "Enter Bearer token", ignoreFocusOut: true }).then((token: string) => {
-                    setupLocalProjectFolder(uri, filePath, token, projectFilePath);
+            azureAccountExt?.activate().then(account => {
+                vscode.window.showInformationMessage('activated the account ext');
+                vscode.commands.executeCommand('azure-account.login').then(() => {
+                    return account.sessions[0].credentials2.getToken().then(tokenResponse => {
+                        vscode.window.showInformationMessage('got the token');
+                        vscode.window.showInputBox({ prompt: "Enter folder path for local project", ignoreFocusOut: true, value: 'f:\\temp' }).then((filePath: string) => {
+                            // tslint:disable-next-line:no-unexternalized-strings
+                            //vscode.window.showInputBox({ prompt: "Enter Bearer token", ignoreFocusOut: true }).then((token: string) => {
+                            setupLocalProjectFolder(uri, filePath, tokenResponse.accessToken, projectFilePath);
+                            //});
+                        });
+                    });
                 });
             });
         }
@@ -82,6 +93,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
                 await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
             } else {
                 await initProjectForVSCode(actionContext, projectFilePath, language);
+                ext.context.globalState.update("isHackathon", false);
             }
         });
         registerEvent(validateEventId, vscode.workspace.onDidChangeWorkspaceFolders, async (actionContext: IActionContext, event: vscode.WorkspaceFoldersChangeEvent) => {
