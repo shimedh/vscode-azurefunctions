@@ -148,8 +148,8 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
     const url: string = `https://${functionAppName}.scm.azurewebsites.net/api/functions/admin/download?includeCsproj=true&includeAppSettings=true`;
     // tslint:disable-next-line:no-any
     const headers: { [key: string]: any } = { Authorization: `Bearer ${token}` };
-    const downloadFilePath: string = `${filePath}\\${functionAppName}.zip`;
-    const folderName: string = downloadFilePath.split('\\')[2].split('.')[0];
+    const downloadFilePath: string = `${filePath}\\tobedeleted\\${functionAppName}.zip`;
+    const folderName: string = downloadFilePath.split('\\')[3].split('.')[0];
     // tslint:disable-next-line: no-floating-promises
     requestUtils.downloadFile(url, downloadFilePath, headers).then(() => {
         vscode.window.showInformationMessage('Download done');
@@ -158,19 +158,19 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
         extract(downloadFilePath, { dir: projectFilePath }, (_err: Error) => {
             vscode.window.showInformationMessage('Extract files done');
             // tslint:disable-next-line: no-floating-promises
-            const downloadDevContainerPath: string = `${filePath}\\master.zip`;
+            const downloadDevContainerPath: string = `${filePath}\\tobedeleted\\master.zip`;
             // tslint:disable-next-line: no-floating-promises
             requestUtils.downloadFile(
                 'https://github.com/microsoft/vscode-dev-containers/archive/master.zip',
                 downloadDevContainerPath
             ).then(() => {
                 vscode.window.showInformationMessage('Download of dev containers done');
-                const devContainerfolderName: string = downloadDevContainerPath.split('\\')[2].split('.')[0];
+                const devContainerfolderName: string = downloadDevContainerPath.split('\\')[3].split('.')[0];
                 // tslint:disable-next-line: no-unsafe-any
-                extract(downloadDevContainerPath, { dir: `${filePath}\\${devContainerfolderName}\\` }, (_err1: Error) => {
+                extract(downloadDevContainerPath, { dir: `${filePath}\\tobedeleted\\${devContainerfolderName}\\` }, (_err1: Error) => {
                     vscode.window.showInformationMessage('Extract dev container files done');
                     vscode.workspace.fs.copy(
-                        vscode.Uri.file(`${filePath}\\${devContainerfolderName}\\vscode-dev-containers-master\\containers\\${devContainerName}\\.devcontainer\\`),
+                        vscode.Uri.file(`${filePath}\\tobedeleted\\${devContainerfolderName}\\vscode-dev-containers-master\\containers\\${devContainerName}\\.devcontainer\\`),
                         vscode.Uri.file(`${projectFilePath}.devcontainer`),
                         {
                             overwrite: true
@@ -178,6 +178,13 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
                     );
 
                     vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(projectFilePath));
+                    vscode.workspace.fs.delete(
+                        vscode.Uri.file(`${filePath}\\tobedeleted\\`),
+                        {
+                            recursive: true,
+                            useTrash: true
+                        }
+                    );
                 });
             });
         });
