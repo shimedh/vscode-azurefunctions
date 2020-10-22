@@ -43,7 +43,6 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     context.subscriptions.push(ext.outputChannel);
     ext.ui = new AzureUserInput(context.globalState);
     const projectFilePath: string = '';
-    const language: ProjectLanguage = ProjectLanguage.PowerShell;
 
     const azureAccountExt = vscode.extensions.getExtension<AzureAccount>("ms-vscode.azure-account");
 
@@ -92,7 +91,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
             if (!ext.context.globalState.get("isHackathon")) {
                 await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
             } else {
-                await initProjectForVSCode(actionContext, projectFilePath, language);
+                await initProjectForVSCode(actionContext, projectFilePath, ext.context.globalState.get("projectLanguage"));
                 ext.context.globalState.update("isHackathon", false);
             }
         });
@@ -143,6 +142,8 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
     const queryParts: string[] = uri.query.split('&');
     const resourceId: string = queryParts[0].split('=')[1];
     const devContainerName: string = queryParts[1].split('=')[1];
+    const language: string = queryParts[2].split('=')[1];
+    ext.context.globalState.update("projectLanguage", getProjectLanguageForLanguage(language));
     const functionAppName: string = getNameFromId(resourceId);
     const url: string = `https://${functionAppName}.scm.azurewebsites.net/api/functions/admin/download?includeCsproj=true&includeAppSettings=true`;
     // tslint:disable-next-line:no-any
@@ -181,4 +182,23 @@ function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: strin
             });
         });
     });
+}
+
+function getProjectLanguageForLanguage(language: string): ProjectLanguage {
+    switch (language) {
+        case 'powershell':
+            return ProjectLanguage.PowerShell;
+        case 'node':
+            return ProjectLanguage.TypeScript;
+        case 'python':
+            return ProjectLanguage.Python;
+        case 'java8':
+        case 'java11':
+            return ProjectLanguage.Java;
+        case 'dotnetcore2.1':
+        case 'dotnetcore3.1':
+            return ProjectLanguage.CSharp;
+        default:
+            throw new Error(`Language not supported: ${language}`);
+    }
 }
