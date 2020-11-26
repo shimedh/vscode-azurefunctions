@@ -12,7 +12,7 @@ import { createStorageClient } from './azureClients';
 import { nonNullProp, nonNullValue } from './nonNull';
 
 function parseResourceId(id: string): RegExpMatchArray {
-    const matches: RegExpMatchArray | null = id.match(/\/subscriptions\/(.*)\/resourceGroups\/(.*)\/providers\/(.*)\/(.*)/);
+    const matches: RegExpMatchArray | null = id.match(/\/subscriptions\/(.*)\/resourceGroups\/(.*)\/providers\/(.*)\/(.*)/) || id.match(/\/subscriptions\/(.*)\/resourcegroups\/(.*)\/providers\/(.*)\/(.*)/);
 
     if (matches === null || matches.length < 3) {
         throw new Error(localize('InvalidResourceId', 'Invalid Azure Resource Id'));

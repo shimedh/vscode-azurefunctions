@@ -6,7 +6,9 @@
 'use strict';
 
 import { WebSiteManagementMappers } from '@azure/arm-appservice';
+import { HttpOperationResponse } from '@azure/ms-rest-js';
 import * as extract from 'extract-zip';
+import { URL } from 'url';
 import * as vscode from 'vscode';
 import { registerAppServiceExtensionVariables } from 'vscode-azureappservice';
 import { AzExtTreeDataProvider, AzureUserInput, callWithTelemetryAndErrorHandling, createApiProvider, createAzExtOutputChannel, IActionContext, registerEvent, registerUIExtensionVariables } from 'vscode-azureextensionui';
@@ -44,27 +46,25 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     ext.ui = new AzureUserInput(context.globalState);
     const projectFilePath: string = '';
 
-    const azureAccountExt = vscode.extensions.getExtension<AzureAccount>("ms-vscode.azure-account");
+    const azureAccountExt: vscode.Extension<AzureAccount> | undefined = vscode.extensions.getExtension<AzureAccount>('ms-vscode.azure-account');
 
     registerUIExtensionVariables(ext);
     registerAppServiceExtensionVariables(ext);
+    // NOTE: Example call for opening vscode with query parameters -
+    // vscode://ms-azuretools.vscode-azurefunctions/?resourceId=<appResourceId>&defaultHostName=<appHostName>&devcontainer=<devContainerName>&language=<appLanguage>&downloadAppContent=<true/false>
     vscode.window.registerUriHandler({
-        handleUri(uri: vscode.Uri): void {
-            vscode.window.showInformationMessage(`Received URL from browser: ${uri.toString()}`);
-            ext.context.globalState.update("isHackathon", true);
-            // tslint:disable-next-line:no-unexternalized-strings
-            azureAccountExt?.activate().then(account => {
-                vscode.window.showInformationMessage('Activated azure account extension, initiating user login');
-                vscode.commands.executeCommand('azure-account.login').then(() => {
-                    vscode.window.showInformationMessage('User login complete');
-                    return account.sessions[0].credentials2.getToken().then(tokenResponse => {
-                        vscode.window.showInformationMessage('Received user token');
-                        vscode.window.showInputBox({ prompt: "Enter folder path for local project", ignoreFocusOut: true, value: 'd:\\hackathon' }).then((filePath: string) => {
-                            setupLocalProjectFolder(uri, filePath, tokenResponse.accessToken, projectFilePath);
-                        });
-                    });
-                });
-            });
+        async handleUri(uri: vscode.Uri): Promise<void> {
+            ext.context.globalState.update('initProjectWithoutConfigVerification', true);
+            const account: AzureAccount | undefined = await activateAzureExtension(azureAccountExt);
+            if (account) {
+                const token = await setupAzureAccount(account);
+                if (token) {
+                    const filePath: string | undefined = await vscode.window.showInputBox({ prompt: 'Enter folder path for your local project', ignoreFocusOut: true });
+                    if (filePath) {
+                        return setupLocalProjectFolder(uri, filePath, token.accessToken, projectFilePath, account);
+                    }
+                }
+            }
         }
     });
 
@@ -86,12 +86,12 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
         const validateEventId: string = 'azureFunctions.validateFunctionProjects';
         // tslint:disable-next-line:no-floating-promises
         callWithTelemetryAndErrorHandling(validateEventId, async (actionContext: IActionContext) => {
-            if (!ext.context.globalState.get("isHackathon")) {
-                await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
-            } else {
+            if (ext.context.globalState.get('initProjectWithoutConfigVerification') === true) {
                 vscode.window.showInformationMessage('Initializing function app project with language specific metadata');
-                ext.context.globalState.update("isHackathon", false);
-                await initProjectForVSCode(actionContext, projectFilePath, ext.context.globalState.get("projectLanguage"));
+                ext.context.globalState.update('initProjectWithoutConfigVerification', false);
+                await initProjectForVSCode(actionContext, projectFilePath, ext.context.globalState.get('projectLanguage'));
+            } else {
+                await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
             }
         });
         registerEvent(validateEventId, vscode.workspace.onDidChangeWorkspaceFolders, async (actionContext: IActionContext, event: vscode.WorkspaceFoldersChangeEvent) => {
@@ -137,63 +137,62 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
 export function deactivateInternal(): void {
 }
 
-function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string, projectFilePath: string): void {
-    const queryParts: string[] = uri.query.split('&');
-    const resourceId: string = queryParts[0].split('=')[1];
-    const devContainerName: string = queryParts[1].split('=')[1];
-    const language: string = queryParts[2].split('=')[1];
-    const functionAppName: string = getNameFromId(resourceId);
-    const url: string = `https://${functionAppName}.scm.azurewebsites.net/api/functions/admin/download?includeCsproj=true&includeAppSettings=true`;
-    // tslint:disable-next-line:no-any
-    const headers: { [key: string]: any } = { Authorization: `Bearer ${token}` };
-    const downloadFilePath: string = `${filePath}\\tobedeleted\\${functionAppName}.zip`;
-    const folderName: string = downloadFilePath.split('\\')[3].split('.')[0];
+async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string, projectFilePath: string, account: AzureAccount): Promise<void> {
+    const requiredInputs = getAllRequiredInputs(uri.query);
+    const resourceId: string | null = requiredInputs.resourceId;
+    const defaultHostName: string | null = requiredInputs.defaultHostName;
+    const devContainerName: string | null = requiredInputs.devContainerName;
+    const language: string | null = requiredInputs.language;
+    const downloadAppContent: string | null = requiredInputs.downloadAppContent;
 
-    ext.context.globalState.update("projectLanguage", getProjectLanguageForLanguage(language));
+    if (resourceId && defaultHostName && devContainerName && language && downloadAppContent) {
+        ext.context.globalState.update('projectLanguage', getProjectLanguageForLanguage(language));
+        const vsCodeFilePathUri: vscode.Uri = vscode.Uri.file(filePath);
+        const toBeDeletedFolderPathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, 'tobedeleted');
 
-    vscode.window.showInformationMessage(`Setting up project for function app '${functionAppName}' with language '${language}'.`);
+        try {
+            const functionAppName: string = getNameFromId(resourceId);
+            const downloadFilePath: string = vscode.Uri.joinPath(toBeDeletedFolderPathUri, `${functionAppName}.zip`).fsPath;
+            const folderName: string = functionAppName;
 
-    // tslint:disable-next-line: no-floating-promises
-    requestUtils.downloadFile(url, downloadFilePath, headers).then(() => {
-        vscode.window.showInformationMessage('Downloaded function app project zip');
-        projectFilePath = `${filePath}\\${folderName}\\`;
-        // tslint:disable-next-line: no-unsafe-any
-        extract(downloadFilePath, { dir: projectFilePath }, (_err: Error) => {
-            vscode.window.showInformationMessage('Extracted project folder from function app zip');
-            vscode.window.showInformationMessage('Downloading the dev container zip');
-            // tslint:disable-next-line: no-floating-promises
-            const downloadDevContainerPath: string = `${filePath}\\tobedeleted\\master.zip`;
-            // tslint:disable-next-line: no-floating-promises
-            requestUtils.downloadFile(
-                'https://github.com/microsoft/vscode-dev-containers/archive/master.zip',
-                downloadDevContainerPath
-            ).then(() => {
-                vscode.window.showInformationMessage('Downloaded dev container zip');
-                const devContainerfolderName: string = downloadDevContainerPath.split('\\')[3].split('.')[0];
-                // tslint:disable-next-line: no-unsafe-any
-                extract(downloadDevContainerPath, { dir: `${filePath}\\tobedeleted\\${devContainerfolderName}\\` }, (_err1: Error) => {
-                    vscode.window.showInformationMessage('Extracted dev container folder from zip');
-                    vscode.workspace.fs.copy(
-                        vscode.Uri.file(`${filePath}\\tobedeleted\\${devContainerfolderName}\\vscode-dev-containers-master\\containers\\${devContainerName}\\.devcontainer\\`),
-                        vscode.Uri.file(`${projectFilePath}.devcontainer`),
-                        {
-                            overwrite: true
-                        }
-                    );
+            vscode.window.showInformationMessage(`Setting up project for function app '${functionAppName}' with language '${language}'.`);
 
-                    vscode.window.showInformationMessage('Restarting VS Code with function app project');
-                    vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(projectFilePath));
-                    vscode.workspace.fs.delete(
-                        vscode.Uri.file(`${filePath}\\tobedeleted\\`),
-                        {
-                            recursive: true,
-                            useTrash: true
-                        }
-                    );
-                });
-            });
-        });
-    });
+            if (downloadAppContent === 'true') {
+                // NOTE: We don't want to download app content for compiler languages.
+                const listKeyResponse: HttpOperationResponse = await requestUtils.getFunctionAppMasterKey(account.sessions[0], resourceId, token);
+                await requestUtils.downloadFunctionAppContent(defaultHostName, downloadFilePath, listKeyResponse.parsedBody.masterKey);
+            }
+
+            const projectFilePathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, `${folderName}`);
+            projectFilePath = projectFilePathUri.fsPath;
+            const devContainerFolderPathUri: vscode.Uri = vscode.Uri.joinPath(projectFilePathUri, '.devcontainer');
+            // tslint:disable-next-line: no-unsafe-any
+            await extract(downloadFilePath, { dir: projectFilePath });
+            await requestUtils.downloadFile(
+                `https://raw.githubusercontent.com/microsoft/vscode-dev-containers/master/containers/${devContainerName}/.devcontainer/devcontainer.json`,
+                vscode.Uri.joinPath(devContainerFolderPathUri, 'devcontainer.json').fsPath
+            );
+            await requestUtils.downloadFile(
+                `https://raw.githubusercontent.com/microsoft/vscode-dev-containers/master/containers/${devContainerName}/.devcontainer/Dockerfile`,
+                vscode.Uri.joinPath(devContainerFolderPathUri, 'Dockerfile').fsPath
+            );
+
+            vscode.window.showInformationMessage('Restarting VS Code with your function app project');
+            vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(projectFilePath));
+        } catch (err) {
+            vscode.window.showErrorMessage('Failed to set up your local project. Please try again.');
+        } finally {
+            vscode.workspace.fs.delete(
+                vscode.Uri.file(toBeDeletedFolderPathUri.fsPath),
+                {
+                    recursive: true,
+                    useTrash: true
+                }
+            );
+        }
+    } else {
+        vscode.window.showErrorMessage('Invalid inputs. Please try again.');
+    }
 }
 
 function getProjectLanguageForLanguage(language: string): ProjectLanguage {
@@ -213,4 +212,30 @@ function getProjectLanguageForLanguage(language: string): ProjectLanguage {
         default:
             throw new Error(`Language not supported: ${language}`);
     }
+}
+
+async function setupAzureAccount(account: AzureAccount): Promise<any> {
+    try {
+        await vscode.commands.executeCommand('azure-account.login');
+        return await account.sessions[0].credentials2.getToken();
+    } catch (err) {
+        vscode.window.showErrorMessage('Failed to setup Azure account. Please try again.');
+        return Promise.resolve(undefined);
+    }
+}
+
+async function activateAzureExtension(azureAccountExt: vscode.Extension<AzureAccount> | undefined): Promise<AzureAccount | undefined> {
+    return await azureAccountExt?.activate();
+}
+
+function getAllRequiredInputs(query: string): { resourceId: string | null; defaultHostName: string | null; devContainerName: string | null; language: string | null; downloadAppContent: string | null } {
+    const queryUrl: URL = new URL(`https://functions.azure.com?${query.toLowerCase()}`);
+
+    return {
+        resourceId: queryUrl.searchParams.get('resourceid'),
+        defaultHostName: queryUrl.searchParams.get('defaulthostname'),
+        devContainerName: queryUrl.searchParams.get('devcontainer'),
+        language: queryUrl.searchParams.get('language'),
+        downloadAppContent: queryUrl.searchParams.get('downloadappcontent'),
+    };
 }
