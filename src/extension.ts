@@ -44,7 +44,6 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     ext.outputChannel = createAzExtOutputChannel('Azure Functions', ext.prefix);
     context.subscriptions.push(ext.outputChannel);
     ext.ui = new AzureUserInput(context.globalState);
-    const projectFilePath: string = '';
 
     const azureAccountExt: vscode.Extension<AzureAccount> | undefined = vscode.extensions.getExtension<AzureAccount>('ms-vscode.azure-account');
 
@@ -59,9 +58,9 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
             if (account) {
                 const token = await setupAzureAccount(account);
                 if (token) {
-                    const filePath: string | undefined = await vscode.window.showInputBox({ prompt: 'Enter folder path for your local project', ignoreFocusOut: true });
+                    const filePath: string | undefined = await vscode.window.showInputBox({ prompt: 'Enter absolute folder path for your local project', ignoreFocusOut: true });
                     if (filePath) {
-                        return setupLocalProjectFolder(uri, filePath, token.accessToken, projectFilePath, account);
+                        return setupLocalProjectFolder(uri, filePath, token.accessToken, account);
                     }
                 }
             }
@@ -89,7 +88,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
             if (ext.context.globalState.get('initProjectWithoutConfigVerification') === true) {
                 vscode.window.showInformationMessage('Initializing function app project with language specific metadata');
                 ext.context.globalState.update('initProjectWithoutConfigVerification', false);
-                await initProjectForVSCode(actionContext, projectFilePath, ext.context.globalState.get('projectLanguage'));
+                await initProjectForVSCode(actionContext, ext.context.globalState.get('projectFilePath'), ext.context.globalState.get('projectLanguage'));
             } else {
                 await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
             }
@@ -137,7 +136,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
 export function deactivateInternal(): void {
 }
 
-async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string, projectFilePath: string, account: AzureAccount): Promise<void> {
+async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string, account: AzureAccount): Promise<void> {
     const requiredInputs = getAllRequiredInputs(uri.query);
     const resourceId: string | null = requiredInputs.resourceId;
     const defaultHostName: string | null = requiredInputs.defaultHostName;
@@ -164,8 +163,9 @@ async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token:
             }
 
             const projectFilePathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, `${folderName}`);
-            projectFilePath = projectFilePathUri.fsPath;
+            const projectFilePath: string = projectFilePathUri.fsPath;
             const devContainerFolderPathUri: vscode.Uri = vscode.Uri.joinPath(projectFilePathUri, '.devcontainer');
+            ext.context.globalState.update('projectFilePath', projectFilePathUri.fsPath);
             // tslint:disable-next-line: no-unsafe-any
             await extract(downloadFilePath, { dir: projectFilePath });
             await requestUtils.downloadFile(
