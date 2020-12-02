@@ -31,6 +31,7 @@ import { PythonDebugProvider } from './debug/PythonDebugProvider';
 import { ext } from './extensionVariables';
 import { registerFuncHostTaskEvents } from './funcCoreTools/funcHostTask';
 import { validateFuncCoreToolsIsLatest } from './funcCoreTools/validateFuncCoreToolsIsLatest';
+import { localize } from './localize';
 import { CentralTemplateProvider } from './templates/CentralTemplateProvider';
 import { AzureAccountTreeItemWithProjects } from './tree/AzureAccountTreeItemWithProjects';
 import { getNameFromId } from './utils/azure';
@@ -58,9 +59,11 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
             if (account) {
                 const token = await setupAzureAccount(account);
                 if (token) {
-                    const filePath: string | undefined = await vscode.window.showInputBox({ prompt: 'Enter absolute folder path for your local project', ignoreFocusOut: true });
+                    const filePath: string | undefined = await vscode.window.showInputBox({ prompt: localize('absoluteFolderPathInputPromptText', 'Enter absolute folder path for your local project'), ignoreFocusOut: true });
                     if (filePath) {
                         return setupLocalProjectFolder(uri, filePath, token.accessToken, account);
+                    } else {
+                        vscode.window.showErrorMessage(localize('filepathUndefinedErrorMessage', 'Folder path not entered. Please try again.'));
                     }
                 }
             }
@@ -86,7 +89,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
         // tslint:disable-next-line:no-floating-promises
         callWithTelemetryAndErrorHandling(validateEventId, async (actionContext: IActionContext) => {
             if (ext.context.globalState.get('initProjectWithoutConfigVerification') === true) {
-                vscode.window.showInformationMessage('Initializing function app project with language specific metadata');
+                vscode.window.showInformationMessage(localize('initializingFunctionAppProjectInfoMessage', 'Initializing function app project with language specific metadata'));
                 ext.context.globalState.update('initProjectWithoutConfigVerification', false);
                 await initProjectForVSCode(actionContext, ext.context.globalState.get('projectFilePath'), ext.context.globalState.get('projectLanguage'));
             } else {
@@ -154,10 +157,10 @@ async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token:
             const downloadFilePath: string = vscode.Uri.joinPath(toBeDeletedFolderPathUri, `${functionAppName}.zip`).fsPath;
             const folderName: string = functionAppName;
 
-            vscode.window.showInformationMessage(`Setting up project for function app '${functionAppName}' with language '${language}'.`);
+            vscode.window.showInformationMessage(localize('settingUpFunctionAppLocalProjInfoMessage', 'Setting up project for function app "${0}" with language "${1}".', functionAppName, language));
 
             if (downloadAppContent === 'true') {
-                // NOTE: We don't want to download app content for compiler languages.
+                // NOTE: We don't want to download app content for compiled languages.
                 const listKeyResponse: HttpOperationResponse = await requestUtils.getFunctionAppMasterKey(account.sessions[0], resourceId, token);
                 await requestUtils.downloadFunctionAppContent(defaultHostName, downloadFilePath, listKeyResponse.parsedBody.masterKey);
             }
@@ -177,10 +180,10 @@ async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token:
                 vscode.Uri.joinPath(devContainerFolderPathUri, 'Dockerfile').fsPath
             );
 
-            vscode.window.showInformationMessage('Restarting VS Code with your function app project');
+            vscode.window.showInformationMessage(localize('restartingVsCodeInfoMessage', 'Restarting VS Code with your function app project'));
             vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(projectFilePath));
         } catch (err) {
-            vscode.window.showErrorMessage('Failed to set up your local project. Please try again.');
+            vscode.window.showErrorMessage(localize('failedLocalProjSetupErrorMessage', 'Failed to set up your local project. Please try again.'));
         } finally {
             vscode.workspace.fs.delete(
                 vscode.Uri.file(toBeDeletedFolderPathUri.fsPath),
@@ -191,7 +194,7 @@ async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token:
             );
         }
     } else {
-        vscode.window.showErrorMessage('Invalid inputs. Please try again.');
+        vscode.window.showErrorMessage(localize('invalidInputsErrorMessage', 'Invalid inputs. Please try again.'));
     }
 }
 
@@ -219,7 +222,7 @@ async function setupAzureAccount(account: AzureAccount): Promise<any> {
         await vscode.commands.executeCommand('azure-account.login');
         return await account.sessions[0].credentials2.getToken();
     } catch (err) {
-        vscode.window.showErrorMessage('Failed to setup Azure account. Please try again.');
+        vscode.window.showErrorMessage(localize('failedAzureAccSetupErrorMessage', 'Failed to setup Azure account. Please try again.'));
         return Promise.resolve(undefined);
     }
 }
@@ -229,6 +232,7 @@ async function activateAzureExtension(azureAccountExt: vscode.Extension<AzureAcc
 }
 
 function getAllRequiredInputs(query: string): { resourceId: string | null; defaultHostName: string | null; devContainerName: string | null; language: string | null; downloadAppContent: string | null } {
+    // NOTE: Need to generate the URL on line 234 so we can use the parser below to get query values.
     const queryUrl: URL = new URL(`https://functions.azure.com?${query.toLowerCase()}`);
 
     return {

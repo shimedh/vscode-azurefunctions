@@ -66,7 +66,7 @@ export namespace requestUtils {
         const request: WebResource = new WebResource();
         request.prepare({
             method: 'POST',
-            url: `https://management.azure.com/${resourceId}/host/default/listkeys?api-version=2018-11-01`,
+            url: `/${resourceId}/host/default/listkeys?api-version=2018-11-01`,
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         return await client.sendRequest(request);
