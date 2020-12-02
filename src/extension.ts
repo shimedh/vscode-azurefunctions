@@ -39,6 +39,20 @@ import { requestUtils } from './utils/requestUtils';
 import { AzureFunctionsExtensionApi } from './vscode-azurefunctions.api';
 import { verifyVSCodeConfigOnActivate } from './vsCodeConfig/verifyVSCodeConfigOnActivate';
 
+enum LocalDevelopmentGlobalStates {
+    initProjectWithoutConfigVerification = 'initProjectWithoutConfigVerification',
+    projectFilePath = 'projectFilePath',
+    projectLanguage = 'projectLanguage'
+}
+
+interface ILocalDevelopmentRequiredInputs {
+    resourceId: string | null;
+    defaultHostName: string | null;
+    devContainerName: string | null;
+    language: string | null;
+    downloadAppContent: string | null;
+}
+
 export async function activateInternal(context: vscode.ExtensionContext, perfStats: { loadStartTime: number; loadEndTime: number }, ignoreBundle?: boolean): Promise<AzureExtensionApiProvider> {
     ext.context = context;
     ext.ignoreBundle = ignoreBundle;
@@ -54,7 +68,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     // vscode://ms-azuretools.vscode-azurefunctions/?resourceId=<appResourceId>&defaultHostName=<appHostName>&devcontainer=<devContainerName>&language=<appLanguage>&downloadAppContent=<true/false>
     vscode.window.registerUriHandler({
         async handleUri(uri: vscode.Uri): Promise<void> {
-            ext.context.globalState.update('initProjectWithoutConfigVerification', true);
+            ext.context.globalState.update(LocalDevelopmentGlobalStates.initProjectWithoutConfigVerification, true);
             const account: AzureAccount | undefined = await activateAzureExtension(azureAccountExt);
             if (account) {
                 const token = await setupAzureAccount(account);
@@ -88,10 +102,10 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
         const validateEventId: string = 'azureFunctions.validateFunctionProjects';
         // tslint:disable-next-line:no-floating-promises
         callWithTelemetryAndErrorHandling(validateEventId, async (actionContext: IActionContext) => {
-            if (ext.context.globalState.get('initProjectWithoutConfigVerification') === true) {
+            if (ext.context.globalState.get(LocalDevelopmentGlobalStates.initProjectWithoutConfigVerification) === true) {
                 vscode.window.showInformationMessage(localize('initializingFunctionAppProjectInfoMessage', 'Initializing function app project with language specific metadata'));
-                ext.context.globalState.update('initProjectWithoutConfigVerification', false);
-                await initProjectForVSCode(actionContext, ext.context.globalState.get('projectFilePath'), ext.context.globalState.get('projectLanguage'));
+                ext.context.globalState.update(LocalDevelopmentGlobalStates.initProjectWithoutConfigVerification, false);
+                await initProjectForVSCode(actionContext, ext.context.globalState.get(LocalDevelopmentGlobalStates.projectFilePath), ext.context.globalState.get(LocalDevelopmentGlobalStates.projectLanguage));
             } else {
                 await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
             }
@@ -140,7 +154,7 @@ export function deactivateInternal(): void {
 }
 
 async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token: string, account: AzureAccount): Promise<void> {
-    const requiredInputs = getAllRequiredInputs(uri.query);
+    const requiredInputs: ILocalDevelopmentRequiredInputs = getAllRequiredInputs(uri.query);
     const resourceId: string | null = requiredInputs.resourceId;
     const defaultHostName: string | null = requiredInputs.defaultHostName;
     const devContainerName: string | null = requiredInputs.devContainerName;
@@ -148,38 +162,40 @@ async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token:
     const downloadAppContent: string | null = requiredInputs.downloadAppContent;
 
     if (resourceId && defaultHostName && devContainerName && language && downloadAppContent) {
-        ext.context.globalState.update('projectLanguage', getProjectLanguageForLanguage(language));
+        ext.context.globalState.update(LocalDevelopmentGlobalStates.projectLanguage, getProjectLanguageForLanguage(language));
         const vsCodeFilePathUri: vscode.Uri = vscode.Uri.file(filePath);
-        const toBeDeletedFolderPathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, 'tobedeleted');
+        const toBeDeletedFolderPathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, 'temp');
 
         try {
-            const functionAppName: string = getNameFromId(resourceId);
+            const functionAppName: string = getNameFromId(resourceId, true);
             const downloadFilePath: string = vscode.Uri.joinPath(toBeDeletedFolderPathUri, `${functionAppName}.zip`).fsPath;
-            const folderName: string = functionAppName;
 
             vscode.window.showInformationMessage(localize('settingUpFunctionAppLocalProjInfoMessage', 'Setting up project for function app "${0}" with language "${1}".', functionAppName, language));
 
             if (downloadAppContent === 'true') {
                 // NOTE: We don't want to download app content for compiled languages.
-                const listKeyResponse: HttpOperationResponse = await requestUtils.getFunctionAppMasterKey(account.sessions[0], resourceId, token);
-                await requestUtils.downloadFunctionAppContent(defaultHostName, downloadFilePath, listKeyResponse.parsedBody.masterKey);
+                await callWithTelemetryAndErrorHandling('azureFunctions.getFunctionAppMasterKeyAndDownloadContent', async (_actionContext: IActionContext) => {
+                    const listKeyResponse: HttpOperationResponse = await requestUtils.getFunctionAppMasterKey(account.sessions[0], resourceId, token);
+                    await requestUtils.downloadFunctionAppContent(defaultHostName, downloadFilePath, listKeyResponse.parsedBody.masterKey);
+                });
             }
 
-            const projectFilePathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, `${folderName}`);
+            const projectFilePathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, `${functionAppName}`);
             const projectFilePath: string = projectFilePathUri.fsPath;
             const devContainerFolderPathUri: vscode.Uri = vscode.Uri.joinPath(projectFilePathUri, '.devcontainer');
-            ext.context.globalState.update('projectFilePath', projectFilePathUri.fsPath);
-            // tslint:disable-next-line: no-unsafe-any
-            await extract(downloadFilePath, { dir: projectFilePath });
-            await requestUtils.downloadFile(
-                `https://raw.githubusercontent.com/microsoft/vscode-dev-containers/master/containers/${devContainerName}/.devcontainer/devcontainer.json`,
-                vscode.Uri.joinPath(devContainerFolderPathUri, 'devcontainer.json').fsPath
-            );
-            await requestUtils.downloadFile(
-                `https://raw.githubusercontent.com/microsoft/vscode-dev-containers/master/containers/${devContainerName}/.devcontainer/Dockerfile`,
-                vscode.Uri.joinPath(devContainerFolderPathUri, 'Dockerfile').fsPath
-            );
-
+            ext.context.globalState.update(LocalDevelopmentGlobalStates.projectFilePath, projectFilePathUri.fsPath);
+            await callWithTelemetryAndErrorHandling('azureFunctions.extractContentAndDownloadDevContainerFiles', async (_actionContext: IActionContext) => {
+                // tslint:disable-next-line: no-unsafe-any
+                await extract(downloadFilePath, { dir: projectFilePath });
+                await requestUtils.downloadFile(
+                    `https://raw.githubusercontent.com/microsoft/vscode-dev-containers/master/containers/${devContainerName}/.devcontainer/devcontainer.json`,
+                    vscode.Uri.joinPath(devContainerFolderPathUri, 'devcontainer.json').fsPath
+                );
+                await requestUtils.downloadFile(
+                    `https://raw.githubusercontent.com/microsoft/vscode-dev-containers/master/containers/${devContainerName}/.devcontainer/Dockerfile`,
+                    vscode.Uri.joinPath(devContainerFolderPathUri, 'Dockerfile').fsPath
+                );
+            });
             vscode.window.showInformationMessage(localize('restartingVsCodeInfoMessage', 'Restarting VS Code with your function app project'));
             vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(projectFilePath));
         } catch (err) {
@@ -231,7 +247,7 @@ async function activateAzureExtension(azureAccountExt: vscode.Extension<AzureAcc
     return await azureAccountExt?.activate();
 }
 
-function getAllRequiredInputs(query: string): { resourceId: string | null; defaultHostName: string | null; devContainerName: string | null; language: string | null; downloadAppContent: string | null } {
+function getAllRequiredInputs(query: string): ILocalDevelopmentRequiredInputs {
     // NOTE: Need to generate the URL on line 234 so we can use the parser below to get query values.
     const queryUrl: URL = new URL(`https://functions.azure.com?${query.toLowerCase()}`);
 

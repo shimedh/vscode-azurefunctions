@@ -52,7 +52,7 @@ export namespace requestUtils {
     }
 
     export async function getFunctionAppMasterKey(azureSession: AzureSession, resourceId: string, accessToken: any): Promise<HttpOperationResponse> {
-        const subscriptionId: string = getSubscriptionFromId(resourceId);
+        const subscriptionId: string = getSubscriptionFromId(resourceId, true);
         const subscriptionContext: ISubscriptionContext = {
             credentials: azureSession.credentials2,
             subscriptionDisplayName: '',
