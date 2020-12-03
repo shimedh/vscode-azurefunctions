@@ -39,7 +39,7 @@ import { requestUtils } from './utils/requestUtils';
 import { AzureFunctionsExtensionApi } from './vscode-azurefunctions.api';
 import { verifyVSCodeConfigOnActivate } from './vsCodeConfig/verifyVSCodeConfigOnActivate';
 
-enum LocalDevelopmentGlobalStates {
+enum GlobalStates {
     initProjectWithoutConfigVerification = 'initProjectWithoutConfigVerification',
     projectFilePath = 'projectFilePath',
     projectLanguage = 'projectLanguage'
@@ -68,7 +68,7 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
     // vscode://ms-azuretools.vscode-azurefunctions/?resourceId=<appResourceId>&defaultHostName=<appHostName>&devcontainer=<devContainerName>&language=<appLanguage>&downloadAppContent=<true/false>
     vscode.window.registerUriHandler({
         async handleUri(uri: vscode.Uri): Promise<void> {
-            ext.context.globalState.update(LocalDevelopmentGlobalStates.initProjectWithoutConfigVerification, true);
+            ext.context.globalState.update(GlobalStates.initProjectWithoutConfigVerification, true);
             const account: AzureAccount | undefined = await activateAzureExtension(azureAccountExt);
             if (account) {
                 const token = await setupAzureAccount(account);
@@ -102,10 +102,10 @@ export async function activateInternal(context: vscode.ExtensionContext, perfSta
         const validateEventId: string = 'azureFunctions.validateFunctionProjects';
         // tslint:disable-next-line:no-floating-promises
         callWithTelemetryAndErrorHandling(validateEventId, async (actionContext: IActionContext) => {
-            if (ext.context.globalState.get(LocalDevelopmentGlobalStates.initProjectWithoutConfigVerification) === true) {
+            if (ext.context.globalState.get(GlobalStates.initProjectWithoutConfigVerification) === true) {
                 vscode.window.showInformationMessage(localize('initializingFunctionAppProjectInfoMessage', 'Initializing function app project with language specific metadata'));
-                ext.context.globalState.update(LocalDevelopmentGlobalStates.initProjectWithoutConfigVerification, false);
-                await initProjectForVSCode(actionContext, ext.context.globalState.get(LocalDevelopmentGlobalStates.projectFilePath), ext.context.globalState.get(LocalDevelopmentGlobalStates.projectLanguage));
+                ext.context.globalState.update(GlobalStates.initProjectWithoutConfigVerification, false);
+                await initProjectForVSCode(actionContext, ext.context.globalState.get(GlobalStates.projectFilePath), ext.context.globalState.get(GlobalStates.projectLanguage));
             } else {
                 await verifyVSCodeConfigOnActivate(actionContext, vscode.workspace.workspaceFolders);
             }
@@ -162,12 +162,12 @@ async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token:
     const downloadAppContent: string | null = requiredInputs.downloadAppContent;
 
     if (resourceId && defaultHostName && devContainerName && language && downloadAppContent) {
-        ext.context.globalState.update(LocalDevelopmentGlobalStates.projectLanguage, getProjectLanguageForLanguage(language));
+        ext.context.globalState.update(GlobalStates.projectLanguage, getProjectLanguageForLanguage(language));
         const vsCodeFilePathUri: vscode.Uri = vscode.Uri.file(filePath);
         const toBeDeletedFolderPathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, 'temp');
 
         try {
-            const functionAppName: string = getNameFromId(resourceId, true);
+            const functionAppName: string = getNameFromId(resourceId, false);
             const downloadFilePath: string = vscode.Uri.joinPath(toBeDeletedFolderPathUri, `${functionAppName}.zip`).fsPath;
 
             vscode.window.showInformationMessage(localize('settingUpFunctionAppLocalProjInfoMessage', 'Setting up project for function app "${0}" with language "${1}".', functionAppName, language));
@@ -183,10 +183,12 @@ async function setupLocalProjectFolder(uri: vscode.Uri, filePath: string, token:
             const projectFilePathUri: vscode.Uri = vscode.Uri.joinPath(vsCodeFilePathUri, `${functionAppName}`);
             const projectFilePath: string = projectFilePathUri.fsPath;
             const devContainerFolderPathUri: vscode.Uri = vscode.Uri.joinPath(projectFilePathUri, '.devcontainer');
-            ext.context.globalState.update(LocalDevelopmentGlobalStates.projectFilePath, projectFilePathUri.fsPath);
+            ext.context.globalState.update(GlobalStates.projectFilePath, projectFilePathUri.fsPath);
             await callWithTelemetryAndErrorHandling('azureFunctions.extractContentAndDownloadDevContainerFiles', async (_actionContext: IActionContext) => {
-                // tslint:disable-next-line: no-unsafe-any
-                await extract(downloadFilePath, { dir: projectFilePath });
+                if (downloadAppContent === 'true') {
+                    // tslint:disable-next-line: no-unsafe-any
+                    await extract(downloadFilePath, { dir: projectFilePath });
+                }
                 await requestUtils.downloadFile(
                     `https://raw.githubusercontent.com/microsoft/vscode-dev-containers/master/containers/${devContainerName}/.devcontainer/devcontainer.json`,
                     vscode.Uri.joinPath(devContainerFolderPathUri, 'devcontainer.json').fsPath
@@ -229,6 +231,7 @@ function getProjectLanguageForLanguage(language: string): ProjectLanguage {
         case 'dotnetcore3.1':
             return ProjectLanguage.CSharp;
         default:
+            vscode.window.showErrorMessage(localize('unsupportedLangErrorMessage', 'Language not supported: "{0}"', language));
             throw new Error(`Language not supported: ${language}`);
     }
 }

@@ -11,14 +11,13 @@ import { localize } from '../localize';
 import { createStorageClient } from './azureClients';
 import { nonNullProp, nonNullValue } from './nonNull';
 
-function parseResourceId(id: string, caseInsensitiveCheck: boolean): RegExpMatchArray {
+function parseResourceId(id: string, caseSensitiveCheck: boolean): RegExpMatchArray {
     let matches: RegExpMatchArray | null;
 
-    if (caseInsensitiveCheck) {
-        matches = id.toLowerCase().match(/\/subscriptions\/(.*)\/resourcegroups\/(.*)\/providers\/(.*)\/(.*)/);
-
-    } else {
+    if (caseSensitiveCheck) {
         matches = id.match(/\/subscriptions\/(.*)\/resourceGroups\/(.*)\/providers\/(.*)\/(.*)/);
+    } else {
+        matches = id.toLowerCase().match(/\/subscriptions\/(.*)\/resourcegroups\/(.*)\/providers\/(.*)\/(.*)/);
     }
 
     if (matches === null || matches.length < 3) {
@@ -28,16 +27,16 @@ function parseResourceId(id: string, caseInsensitiveCheck: boolean): RegExpMatch
     return matches;
 }
 
-export function getResourceGroupFromId(id: string, caseInsensitiveCheck: boolean = false): string {
-    return parseResourceId(id, caseInsensitiveCheck)[2];
+export function getResourceGroupFromId(id: string, caseSensitiveCheck: boolean = true): string {
+    return parseResourceId(id, caseSensitiveCheck)[2];
 }
 
-export function getSubscriptionFromId(id: string, caseInsensitiveCheck: boolean = false): string {
-    return parseResourceId(id, caseInsensitiveCheck)[1];
+export function getSubscriptionFromId(id: string, caseSensitiveCheck: boolean = true): string {
+    return parseResourceId(id, caseSensitiveCheck)[1];
 }
 
-export function getNameFromId(id: string, caseInsensitiveCheck: boolean = false): string {
-    return parseResourceId(id, caseInsensitiveCheck)[4];
+export function getNameFromId(id: string, caseSensitiveCheck: boolean = true): string {
+    return parseResourceId(id, caseSensitiveCheck)[4];
 }
 
 export interface IBaseResourceWithName {
